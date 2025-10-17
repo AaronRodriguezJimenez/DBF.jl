@@ -6,8 +6,8 @@ using Printf
 ############## TESTING PARAMETERS #################
 # Test Hubbard 2D
 println("Major-Row Ordering: Hubbard 2D Hamiltonian")
-Lx, Ly = 2, 2
-t, U = 1.00, 1.0
+Lx, Ly = 2, 1
+t, U = 0.1, 1.0
 H = DBF.fermi_hubbard_2D(Lx, Ly, t, U)   # your function (returns PauliSum)
 N_total = 2 * Lx * Ly
 
