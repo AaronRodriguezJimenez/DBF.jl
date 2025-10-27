@@ -94,12 +94,24 @@ function LinearAlgebra.norm(p::PauliSum{N,T}) where {N,T}
     return sqrt(real(out))
 end
 
+function LinearAlgebra.norm(p::KetSum{N,T}) where {N,T}
+    out = T(0)
+    for (p,c) in p 
+        out += abs2(c) 
+    end
+    return sqrt(real(out))
+end
+
 function weight(p::PauliBasis) 
     return count_ones(p.x | p.z)
 end
 
+function coeff_clip!(ps::KetSum{N}; thresh=1e-16) where {N}
+    return filter!(p->abs(p.second) > thresh, ps)
+end
+
 function coeff_clip!(ps::PauliSum{N}; thresh=1e-16) where {N}
-    filter!(p->abs(p.second) > thresh, ps)
+    return filter!(p->abs(p.second) > thresh, ps)
 end
 
 function coeff_clip(ps::PauliSum{N}; thresh=1e-16) where {N}
@@ -111,7 +123,7 @@ end
     Performs the pruning by removing all terms with weight > max_weight.
 """
 function weight_clip!(ps::PauliSum{N}, max_weight::Int) where {N}
-    filter!(p->weight(p.first) <= max_weight, ps)
+    return filter!(p->weight(p.first) <= max_weight, ps)
 end
 
 function majorana_weight_clip!(ps::PauliSum{N}, max_weight::Int) where {N}
@@ -268,4 +280,203 @@ function find_top_k_offdiag(dict, k=10)
     # Sort the results
     p = sortperm(view(top_abs, 1:n_found), rev=true)
     return [top_keys[p[i]] => top_vals[p[i]] for i in 1:n_found]
+end
+
+
+
+function get_weight_counts(O::PauliSum{N}) where N
+    counts = zeros(Int, N)
+    for (p,c) in O
+        counts[weight(p)] += 1
+    end
+    return counts
+end
+
+
+function get_weight_probs(O::PauliSum{N}) where N
+    probs = zeros(N)
+    for (p,c) in O
+        probs[weight(p)] += abs2(c) 
+    end
+    return probs 
+end
+
+function add_single_excitations(k::Ket{N}) where N
+    s = KetSum(N)
+    s[k] = 1
+    for i in 1:N
+        for j in 1:N
+            i != j || continue
+            c,b = Pauli(N, X=[i, j]) * k
+            # count_ones(k.v) == count_ones(b.v) || continue 
+            coeff = get(s, b, 0)
+            s[b] = coeff + c
+        end
+    end
+    # for (k,c) in s 
+    #     @show count_ones(k.v)
+    # end
+    return s
+end
+
+"""
+    Base.Matrix(p::PauliSum{N,T}, Vector{Ket{N}}) where {N,T}
+
+Build Matrix representation of `p` in the space dfined by `S`
+"""
+# function Base.Matrix(p::PauliSum{N,T}, S::Vector{Ket{N}}) where {N,T}
+#     nS = length(S)
+#     M = zeros(T,nS,nS)
+#     for i in 1:nS
+#         M[i,i] = expectation_value(p,S[i])
+#         for j in i+1:nS
+#             M[i,j] = matrix_element(S[i]',p,S[j])
+#             M[j,i] = matrix_element(S[j]',p,S[i])
+#         end
+#     end
+#     return M
+# end
+function Base.Matrix(O::PauliSum{N,T}, S::Vector{Ket{N}}) where {N,T}
+    nS = length(S)
+    
+    o = pack_x_z(O)
+
+    def = Vector{Tuple{Int128, Float64}}()
+
+    M = zeros(T,nS,nS)
+    for i in 1:nS
+        M[i,i] = expectation_value(O,S[i])
+        for j in i+1:nS
+            x = S[i].v ⊻ S[j].v
+            ox = get(o, x, def)
+            for (z,c) in ox
+                p = PauliBasis{N}(z,x)
+                phase, k = p*S[j]
+                M[i,j] += phase*c
+
+                phase, k = p*S[i]
+                M[j,i] += phase*c
+            end
+        end
+    end
+    return M
+end
+
+function Base.Matrix(O::XZPauliSum{T}, basis::Vector{Ket{N}}) where {N,T}
+    n = length(basis)
+    
+    def = Dict{Int128, Float64}()
+
+    M = zeros(ComplexF64,n,n)
+    for (i, keti) in enumerate(basis)
+        # M[i,i] = expectation_value(O,keti)
+
+        for (j, ketj) in enumerate(basis)
+            j >= i || continue
+            x = keti.v ⊻ ketj.v
+            ox = get(O, x, def)
+            for (z,c) in ox
+            # for (z,c) in o[x]
+                p = PauliBasis{N}(z,x)
+                phase,_ = p*ketj
+                M[i,j] += phase*c
+
+                j > i || continue
+                phase,_  = p*keti
+                M[j,i] += phase*c
+            end
+        end
+    end
+    return M
+end
+
+function Base.Matrix(k::KetSum{N,T}, S::Vector{Ket{N}}) where {N,T}
+    nS = length(S)
+    v = zeros(T,nS,1)
+    length(k) == length(S) || throw(DimensionMismatch)
+    for (i,keti) in enumerate(S)
+        v[i,1] = k[keti]
+    end
+    return v
+end
+
+function Base.Vector(k::KetSum{N,T}, S::Vector{Ket{N}}) where {N,T}
+    nS = length(S)
+    v = zeros(T,nS)
+    length(k) == length(S) || throw(DimensionMismatch)
+    for (i,keti) in enumerate(S)
+        v[i] = k[keti]
+    end
+    return v
+end
+
+
+
+
+function Base.:*(O::PauliSum{N,T}, k::Ket{N}) where {N,T}
+    out = KetSum(N)
+    for (p,c) in O
+        c2,k2 = p*k
+        tmp = get(out, k2, 0.0)
+        out[k2] = tmp + c2*c
+    end
+    return out 
+end
+
+function PauliOperators.expectation_value(O::PauliSum, v::KetSum)
+    ev = 0
+    for (p,c) in O
+        for (k1,c1) in v
+            ev += expectation_value(p,k1)*c*c1'*c1
+            for (k2,c2) in v
+                k2 != k1 || continue
+                ev += matrix_element(k2', p, k1)*c*c2'*c1
+            end
+        end
+    end
+    return ev
+end
+
+function PauliOperators.expectation_value(O::XZPauliSum, v::KetSum{N,T}) where {N,T}
+    ev = 0
+    for (x,zs) in O
+        for (z,c) in zs 
+            p = PauliBasis{N}(z,x)
+            for (k1,c1) in v
+                ev += expectation_value(p,k1)*c*c1'*c1
+                for (k2,c2) in v
+                    k2 != k1 || continue
+                    ev += matrix_element(k2', p, k1)*c*c2'*c1
+                end
+            end
+        end
+    end
+    return ev
+end
+function PauliOperators.expectation_value(O::XZPauliSum, v::Ket{N}) where {N}
+    ev = 0
+    haskey(O,0) || return 0.0
+    for (z,c) in O[0]
+        p = PauliBasis{N}(z,Int128(0))
+        ev += expectation_value(p,v)*c
+    end
+    return ev
+end
+
+"""
+    pack_x_z(H::PauliSum{N,T}) where {N,T}
+
+Convert PauliSum into a Dict{Int128,Vector{Tuple{Int128,Float64}}}
+This allows us to access Pauli's by first specifying `x`, 
+then 'z'. 
+"""
+function pack_x_z(H::PauliSum{N,T}) where {N,T}
+    # Build [X][Z] container
+    h = Dict{Int128,Vector{Tuple{Int128,T}}}()
+    for (p,c) in H
+        dx = get(h, p.x, Vector{Tuple{Int128,T}}())
+        push!(dx, (p.z,c))
+        h[p.x] = dx
+    end
+    return h
 end

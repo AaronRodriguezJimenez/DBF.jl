@@ -11,7 +11,7 @@ function adapt(Oin::PauliSum{N,T}, pool::Vector{PauliBasis{N}}, ψ::Ket{N};
             max_iter=10, thresh=1e-4, verbose=1, conv_thresh=1e-3,
             evolve_coeff_thresh=1e-12,
             evolve_weight_thresh=20,
-            evolve_grad_thresh=1e-8,
+            grad_coeff_thresh=1e-8,
             extra_diag=nothing) where {N,T}
     O = deepcopy(Oin)
     generators = Vector{PauliBasis}([])
@@ -32,6 +32,7 @@ function adapt(Oin::PauliSum{N,T}, pool::Vector{PauliBasis{N}}, ψ::Ket{N};
     verbose < 1 || @printf(" %12s", "len(H)")
     verbose < 1 || @printf(" %12s", "total_error")
     verbose < 1 || @printf(" %12s", "variance")
+    verbose < 1 || @printf(" %12s", "Sh Entropy")
     verbose < 1 || @printf("\n")
     
     for iter in 1:max_iter
@@ -42,7 +43,11 @@ function adapt(Oin::PauliSum{N,T}, pool::Vector{PauliBasis{N}}, ψ::Ket{N};
             # dyad = (ψ * ψ') * p'
             # grad_vec[pi] = 2*imag(expectation_value(O,dyad))
             c, σ = p*ψ
-            grad_vec[pi] = 2*imag(matrix_element(σ', O, ψ)*c)
+            # grad_vec[pi] = 2*imag(matrix_element(σ', O, ψ)*c)
+            g  = matrix_element(σ', O, ψ)*c
+            g -= matrix_element(ψ', O, σ)*c'
+            # @show g
+            grad_vec[pi] = imag(g) 
         end
         
         Gidx = argmax(abs.(grad_vec))
@@ -74,14 +79,14 @@ function adapt(Oin::PauliSum{N,T}, pool::Vector{PauliBasis{N}}, ψ::Ket{N};
 
             #
             # make sure gradient is non-negligible
-            abs(grad_vec[gi]) > evolve_grad_thresh || continue
+            abs(grad_vec[gi]) > grad_coeff_thresh || continue
 
             G = pool[gi]
             θi, costi = DBF.optimize_theta_expval(O, G, ψ, verbose=0)
            
             #
             # make sure energy lowering is large enough to warrent evolving
-            abs(costi(0) - costi(θi)) > evolve_grad_thresh || continue
+            abs(costi(0) - costi(θi)) > grad_coeff_thresh || continue
            
 
             O = evolve(O,G,θi)
@@ -114,143 +119,7 @@ function adapt(Oin::PauliSum{N,T}, pool::Vector{PauliBasis{N}}, ψ::Ket{N};
         verbose < 1 || @printf(" %12i", length(O))
         verbose < 1 || @printf(" %12.8f", real(accumulated_error))
         verbose < 1 || @printf(" %12.8f", real(var_curr))
-        verbose < 1 || @printf("\n")
-        
-        # if norm_new - norm_old < conv_thresh
-        if norm_new < conv_thresh
-            verbose < 1 || @printf(" Converged.\n")
-            break
-        end
-       
-        # if norm_new > norm_old
-        #     println(" Norm increased?")
-        #     throw(ErrorException)
-        # end
-        if iter == max_iter
-            verbose < 1 || @printf(" Not Converged.\n")
-        end
-      
-        if n_rots == 0
-            @warn """ No search directions found. 
-                    Tighten `evolve_grad_thresh` or expand pool"""
-            break
-        end
-        norm_old = norm_new
-        # G_old = G
-    end
-    return O, generators, angles
-end
-
-"""
- Adapt for fermionic systems (Testing usage)
-"""
-function adapt_fermion(Oin::PauliSum{N,T}, pool::Vector{PauliBasis{N}}, ψ::Ket{N}; 
-            max_iter=10, thresh=1e-4, verbose=1, conv_thresh=1e-3,
-            evolve_coeff_thresh=1e-12,
-            evolve_weight_thresh=20,
-            evolve_grad_thresh=1e-8,
-            extra_diag=nothing) where {N,T}
-    O = deepcopy(Oin)
-    generators = Vector{PauliBasis}([])
-    angles = Vector{Float64}([])
-    norm_old = norm(offdiag(O))
-            
-    ecurr = expectation_value(O, ψ) 
-
-    G_old = Pauli(N)
-    
-    accumulated_error = 0
-
-    grad_vec = zeros(length(pool))
-
-    verbose < 1 || @printf(" %6s %12s %12s", "Iter", "|H|", "<ψ|H|ψ>")
-    verbose < 1 || @printf(" %12s", "||<[H,Gi]>||")
-    verbose < 1 || @printf(" %12s", "# Rotations")
-    verbose < 1 || @printf(" %12s", "len(H)")
-    verbose < 1 || @printf(" %12s", "total_error")
-    verbose < 1 || @printf(" %12s", "variance")
-    verbose < 1 || @printf("\n")
-    
-    for iter in 1:max_iter
-        
-
-        # Compute gradient vector
-        for (pi,p) in enumerate(pool)
-            # dyad = (ψ * ψ') * p'
-            # grad_vec[pi] = 2*imag(expectation_value(O,dyad))
-            c, σ = p*ψ
-            grad_vec[pi] = 2*imag(matrix_element(σ', O, ψ)*c)
-        end
-        
-        Gidx = argmax(abs.(grad_vec))
-        G = pool[Gidx]
-        # G = argmax(k -> abs(f(k)), pool)
-
-        norm_new = norm(grad_vec)
-        # G = argmax(k -> abs(com[k]), keys(com))
-
-        # if G == G_old
-        #     println(" Trapped? ", string(G), " ", coeff)
-        #     θi, costi = DBF.optimize_theta_expval(O, G, ψ, verbose=1)
-        #     # θi, costi = DBF.optimize_theta_expval(O, G, ψ, stepsize=.000001, verbose=1)
-        #     step = .1
-        #     for i in 0:.01:1
-        #         θ = i*step*2π
-        #         @printf(" θ=%12.8f cost=%12.8f\n", θ, costi(θ))
-        #     end
-        #     break
-        # end
-       
-        sorted_idx = reverse(sortperm(abs.(grad_vec)))
-
-        verbose < 2 || @printf("     %8s %12s %12s", "pool idx", "||O||", "<ψ|H|ψ>")
-        verbose < 2 || @printf(" %12s %12s %s", "len(O)", "θi", string(G))
-        verbose < 2 || @printf("\n")
-        n_rots = 0
-        for gi in sorted_idx
-
-            #
-            # make sure gradient is non-negligible
-            abs(grad_vec[gi]) > evolve_grad_thresh || continue
-
-            G = pool[gi]
-            θi, costi = DBF.optimize_theta_expval(O, G, ψ, verbose=0)
-           
-            #
-            # make sure energy lowering is large enough to warrent evolving
-            abs(costi(0) - costi(θi)) > evolve_grad_thresh || continue
-           
-
-            O = evolve(O,G,θi)
-
-            e1 = expectation_value(O,ψ)
-            #
-            # Truncate operator
-            coeff_clip!(O, thresh=evolve_coeff_thresh)
-            majorana_weight_clip!(O, evolve_weight_thresh)
-            e2 = expectation_value(O,ψ)
-
-            accumulated_error += e2 - e1
-            # if norm_new - costi(θi) > 1e-12
-            #     @show norm_new - costi(θi)
-            #     throw(ErrorException)
-            # end
-            # norm_new = costi(θi)/O_norm
-            ecurr = expectation_value(O, ψ) 
-            verbose < 2 || @printf("     %8i %12.8f %12.8f", gi, norm(O), ecurr)
-            verbose < 2 || @printf(" %12i %12.8f %s", length(O), θi, string(G))
-            verbose < 2 || @printf("\n")
-            push!(generators, G)
-            push!(angles, θi)
-            n_rots += 1
-            flush(stdout)
-        end
-        var_curr = variance(O,ψ)
-        verbose < 1 || @printf("*%6i %12.8f %12.8f %12.8f", iter, norm(O), ecurr, norm_new)
-        verbose < 1 || @printf(" %12i", n_rots)
-        verbose < 1 || @printf(" %12i", length(O))
-        verbose < 1 || @printf(" %12.8f", real(accumulated_error))
-        verbose < 1 || @printf(" %12.8f", real(var_curr))
+        verbose < 1 || @printf(" %12.8f", entropy(O))
         verbose < 1 || @printf("\n")
         
         # if norm_new - norm_old < conv_thresh
@@ -279,7 +148,7 @@ function adapt_fermion(Oin::PauliSum{N,T}, pool::Vector{PauliBasis{N}}, ψ::Ket{
 end
 
 function variance(O::PauliSum{N}, ψ::Ket{N}) where N
-    σ = KetSum(N)
+    σ = KetSum(N, ComplexF64)
     for (p,ci) in O
         cj, ki = p*ψ
         # σ[ki] += cj*ci
@@ -296,6 +165,24 @@ function variance(O::PauliSum{N}, ψ::Ket{N}) where N
     e1 = expectation_value(O,ψ)
 
     return e2 - e1^2
+end
+
+function generate_commutator_pool(O::PauliSum{N}) where N
+    S = PauliSum(N)
+    for i in 1:N
+        S += PauliBasis(Pauli(N,Z=[i]))
+        for j in i+1:N
+            S += PauliBasis(Pauli(N,Z=[i,j]))
+        end
+    end
+    gen = O*S-S*O
+    coeff_clip!(gen)
+
+    pool = Vector{PauliBasis{N}}([])
+    for (p,c) in gen 
+        push!(pool,p)
+    end
+    return pool
 end
 
 
@@ -568,8 +455,15 @@ function pool_test1(O::PauliSum{N}) where N
     return [first(x) for x in sort(collect(pool), by = x -> abs(last(x)))]
 end
 
-function entropy(H)
+function entropy(O)
 
     # S = -sum_i |c_i|^2 log(|c_i|^2)
     # S(x) = 
+    s = 0
+    n = norm(O)
+    for (_,c) in O
+        p = abs2(c)/n^2
+        s -= p*log(p)
+    end
+    return s
 end

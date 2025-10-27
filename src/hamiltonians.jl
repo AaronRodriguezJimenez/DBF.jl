@@ -1,4 +1,5 @@
 using PauliOperators
+using Random
 
 function heisenberg_1D(N, Jx, Jy, Jz; x=0, y=0, z=0)
     H = PauliSum(N, Float64)
@@ -78,74 +79,6 @@ function heisenberg_2D(Nx, Ny, Jx, Jy, Jz; x=0, y=0, z=0, periodic=true)
         H += z * Pauli(N_total, Z=[site])
     end
     
-    return H
-end
-
-"""
- - - - Heisenberg model 2D (snake/zizag ordering) Not working with periodic. - - -
-"""
-function heisenberg_2D_snake(Lx::Int, Ly::Int, Jx::Float64, Jy::Float64, Jz::Float64; x=0, y=0, z=0, 
-                             periodic::Bool=false,  snake_ordering::Bool=false)
-    Nsites  = Lx * Ly
-    N_total = Nsites
-    H = PauliSum(N_total, Float64)
-
-    # Spin indices for site j (1-based site indexing)
-    up(j) = j
-    dn(j) = j + Nsites
-
-    # Map (row x, col y) -> site index j in [1, Nsites]
-    @inline function site_index(x::Int, y::Int)
-        if !snake_ordering
-            # Row-major
-            return (x - 1) * Ly + y
-        else
-            # Snake (zigzag) row-major:
-            # odd rows (x=1,3,...) go left->right
-            # even rows (x=2,4,...) go right->left
-            if isodd(x)
-                return (x - 1) * Ly + y
-            else
-                return x * Ly - (y - 1)
-            end
-        end
-    end
-
-    # Nearest-neighbor interactions
-    for j in 1:Ly  # Row index
-        for i in 1:Lx  # Column index
-            current_site = site_index(i, j)
-            
-            # Right neighbor (i+1, j)
-            if i < Lx || periodic
-                right_i = periodic ? (i + 1) % Lx : i + 1
-                right_site = site_index(right_i, j)
-                
-                H += -2*Jx * Pauli(N_total, X=[current_site, right_site])
-                H += -2*Jy * Pauli(N_total, Y=[current_site, right_site])
-                H += -2*Jz * Pauli(N_total, Z=[current_site, right_site])
-            end
-            
-            # Up neighbor (i, j+1)  
-            if j < Ly || periodic
-                up_j = periodic ? (j + 1) % Ly : j + 1
-                up_site = site_index(i, up_j)
-                
-                H += -2*Jx * Pauli(N_total, X=[current_site, up_site])
-                H += -2*Jy * Pauli(N_total, Y=[current_site, up_site])
-                H += -2*Jz * Pauli(N_total, Z=[current_site, up_site])
-            end
-        end
-    end
-    
-    # External magnetic field terms
-    for site in 1:N_total
-        H += x * Pauli(N_total, X=[site])
-        H += y * Pauli(N_total, Y=[site]) 
-        H += z * Pauli(N_total, Z=[site])
-    end
-
-    DBF.coeff_clip!(H)
     return H
 end
 
@@ -300,60 +233,42 @@ function fermi_hubbard_2D(Lx::Int, Ly::Int, t::Float64, U::Float64)
 end
 
 
-"""
- - - - Fermi-Hubbard model 2D (snake/zizag ordering) - - -
- The following function constructs the Hamiltonian for the 2D Fermi-Hubbard model
-    using a snake-like (zigzag) ordering of the lattice sites.
-  Constucts the model on a Lx x Ly lattive of physical sites,
-  each site has two spin-orbitals (up, down), so the total number of fermionic modes is 
-  N_total = 2 * Lx * Ly.
-  If 'snake_ordering' is true, the physical sites follow a row-wise "snake/zigzag" pattern.
-  Returns a PauliSum representing the Hamiltonian.
-"""
-function fermi_hubbard_2D_snake(Lx::Int, Ly::Int, t::Float64, U::Float64; snake_ordering::Bool=false)
-    Nsites  = Lx * Ly
-    N_total = 2 * Nsites
+function fermi_hubbard_2D_zigzag(Lx::Int, Ly::Int, t::Float64, U::Float64)
+    Nsites = Lx * Ly
+    N_total = 2 * Nsites   # Total number of fermionic modes (spin up and down)
     H = PauliSum(N_total, Float64)
 
-    # Spin-orbital indices for site j (1-based site indexing)
+    if 2 * Nsites != N_total
+        throw(ArgumentError("Total qubits N must equal 2 * Lx * Ly. Got N=$N_total, Lx*Ly=$Nsites"))
+    end
+
     up(j) = 2*j - 1
     dn(j) = 2*j
+    # linear_index(x,y) = (x - 1) * Ly + y   # x in 1:Lx, y in 1:Ly
 
-    # Map (row x, col y) -> site index j in [1, Nsites]
-    @inline function site_index(x::Int, y::Int)
-        if !snake_ordering
-            # Row-major
-            return (x - 1) * Ly + y
-        else
-            # Snake (zigzag) row-major:
-            # odd rows (x=1,3,...) go left->right
-            # even rows (x=2,4,...) go right->left
-            if isodd(x)
-                return (x - 1) * Ly + y
-            else
-                return x * Ly - (y - 1)
-            end
-        end
-    end
+    linear_index(i, j) = isodd(j) ? (j - 1) * Lx + i : j * Lx - i + 1
 
-    # HOPPING: nearest-neighbor pairs (right and down) — add h.c.; both spins
-    for x in 1:Lx, y in 1:Ly
-        jsite = site_index(x, y)
+    # small tolerance for dropping tiny coeffs
+    eps_coeff = 1e-12
 
-        # neighbor in +x (next row)
+    # HOPPING: loop nearest-neighbour pairs once, add c_i^† c_j + c_j^† c_i (both spins)
+    for y in 1:Ly, x in 1:Lx
+        println(x, "  ", y)
+        jsite = linear_index(x, y)
+        display(jsite)
+         # neighbor +x (right in x)
         if x < Lx
-            isite = site_index(x + 1, y)
+            isite = linear_index(x + 1, y)
             for spin in (up, dn)
-                m = spin(jsite)
-                n = spin(isite)
+                m = spin(jsite)   # mode index for j
+                n = spin(isite)   # mode index for i
                 term = JWmapping(N_total, i=m, j=n) + JWmapping(N_total, i=n, j=m)
                 H += -t * term
             end
         end
-
-        # neighbor in +y (next column)
-        if y < Ly
-            isite = site_index(x, y + 1)
+         # neighbor +y (right in y)
+         if y < Ly
+            isite = linear_index(x, y + 1)
             for spin in (up, dn)
                 m = spin(jsite)
                 n = spin(isite)
@@ -363,15 +278,95 @@ function fermi_hubbard_2D_snake(Lx::Int, Ly::Int, t::Float64, U::Float64; snake_
         end
     end
 
-    # On-site interaction U * n_up * n_dn
     for i in 1:Nsites
-        a_up = 2*i - 1
-        a_dn = 2*i
-        interaction_term = U * JWmapping(N_total, i=a_up, j=a_up) *
-                               JWmapping(N_total, i=a_dn, j=a_dn)
+        a_up = 2*i - 1   # spin-up orbital index
+        a_dn = 2*i       # spin-down orbital index
+        interaction_term = U *JWmapping(N_total, i=a_up, j=a_up) * JWmapping(N_total, i=a_dn, j=a_dn)
+
         H += interaction_term
     end
 
-    DBF.coeff_clip!(H)
+    # Filter zero coefficients
+    DBF.coeff_clip!(H, thresh=eps_coeff)
+
     return H
 end
+
+# # Test Hubbard 1D
+# H = hubbard_model_1D(2, 5.0, 2.0)
+# display(H)
+# println("Number of terms in Hubbard 1D Hamiltonian: ", length(H))
+
+# # Test Hubbard 2D
+# H = fermi_hubbard_2D(1, 2, 5.0, 2.0)
+# display(H)
+# println("Number of terms in Hubbard 2x1 Hamiltonian: ", length(H))
+
+function heisenberg_central_spin(N, Jx, Jy, Jz; x=0, y=0, z=0, α=0, seed=1)
+    # All spins coupled through site 1
+    H = PauliSum(N, Float64)
+    Random.seed!(seed)
+    for i in 2:N
+        ϵ = randn() * α
+        H += (-2*Jx + ϵ) * Pauli(N, X=[1,i]) 
+        H += (-2*Jy + ϵ) * Pauli(N, Y=[1,i]) 
+        H += (-2*Jz + ϵ) * Pauli(N, Z=[1,i]) 
+    end 
+    for i in 1:N
+        H += x * Pauli(N, X=[i])
+        H += y * Pauli(N, Y=[i])
+        H += z * Pauli(N, Z=[i])
+    end 
+    return H
+end
+
+function heisenberg_sparse(N, Jx, Jy, Jz, sparsity; x=0, y=0, z=0, seed=1, α=1)
+    # All spins coupled through site 1
+    Random.seed!(seed)
+    H = PauliSum(N, Float64)
+    for i in 1:N
+        for j in i+1:N
+            rand() < sparsity || continue
+            coupling = randn() * α
+            H += -2*Jx * Pauli(N, X=[i,j]) * coupling 
+            H += -2*Jy * Pauli(N, Y=[i,j]) * coupling
+            H += -2*Jz * Pauli(N, Z=[i,j]) * coupling
+        end 
+    end 
+    for i in 1:N
+        rand() < sparsity || continue
+        H += x * Pauli(N, X=[i])
+        H += y * Pauli(N, Y=[i])
+        H += z * Pauli(N, Z=[i])
+    end 
+    return H
+end
+
+function graph_laplacian(O::PauliSum{N,T}) where {N,T}
+    A = graph_adjacency(O) 
+    
+    L = -1*A
+    for i in 1:N
+        L[i,i] = sum(A[:,i])
+    end
+    return L 
+end 
+
+function graph_adjacency(O::PauliSum{N,T}) where {N,T}
+    A = zeros(Float64, N, N)
+    for (p,c) in O
+        on = PauliOperators.get_on_bits(p.z|p.x)
+        # @show string(p)
+        # display(on)
+        for i in 1:length(on)
+            for j in i+1:length(on)
+                ii = on[i]
+                jj = on[j]
+                A[ii,jj] += abs(c)
+                A[jj,ii] += abs(c)
+            end
+        end
+    end
+    
+    return A 
+end 
