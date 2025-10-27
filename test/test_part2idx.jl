@@ -89,6 +89,6 @@ end
 
 
 # provide a 6qubit state with 3 particles
-ket_example = particle_ket(50, 25, mode=:alternate)
+ket_example = particle_ket(50, 25, mode=:random)
 println("Ket with 3 particles in 6 sites:")
 display(ket_example)
