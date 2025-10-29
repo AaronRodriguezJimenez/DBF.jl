@@ -6,11 +6,13 @@ using Printf
 ############## TESTING PARAMETERS #################
 # Test Hubbard 2D
 println("Major-Row Ordering: Hubbard 2D Hamiltonian")
-Lx, Ly = 2, 1
-t, U = 0.1, 1.0
-H = DBF.fermi_hubbard_2D(Lx, Ly, t, U)   # your function (returns PauliSum)
+Lx, Ly = 2, 2 
+t, U = 1.0, 1.0
+H = DBF.fermi_hubbard_2D(Lx, Ly, t, U)  
+#H = DBF.fermi_hubbard_2D_zigzag(Lx, Ly, t, U)
 N_total = 2 * Lx * Ly
 
+display(H)
 
 ################ FUNCTIONS #######################################################
 # --- Build number operator (sum over modes) ---------------------------------
@@ -95,9 +97,8 @@ function commutes_with(H, O; tol=1e-12, small_dim_limit=16)
     N_total = first(keys(H)).x |> (z->begin  # try to find a PauliBasis and infer N bits
         # fallback if that fails
         try
-            # this is fragile if dict keys aren't PauliBasis{N}
             kv = first(keys(H))
-            # we need N; rely on your PauliBasis constructor or external information:
+            # we need N; rely on PauliBasis constructor or external information:
             # instead, user should pass O/H built from same N; we can deduce N_total
             return nothing
         catch
@@ -202,8 +203,9 @@ function bitstring_repr(idx::UInt128, N_total::Int)
         mask = UInt128(1) << (q-1)
         chars[q] = ((idx & mask) != 0) ? '1' : '0'
     end
-    return join(chars)#reverse(chars))   # reverse if you want qubit 1 on leftmost
+    return join(reverse(chars))   # reverse if you want qubit 1 on leftmost
 end
+
 
 """
     projector_for_particle(n::Int, N_total::Int; max_dense=16)
@@ -248,7 +250,7 @@ function project_H_to_sector_dense(H::PauliSum, n::Int; max_dense::Int=16)
         throw(ArgumentError("Dense sector projection refused: N_total=$N_total > max_dense=$max_dense"))
     end
 
-    M_H = paulisum_to_matrix(H)   # your helper; returns dense matrix
+    M_H = paulisum_to_matrix(H)   # returns dense matrix
     P = projector_for_particle(n, N_total; max_dense=max_dense)
     return P * M_H * P
 end
@@ -283,15 +285,6 @@ end
     return count_ones(x)
 end
 
-# string repr: leftmost = qubit 1 (same convention as earlier)
-function bitstring_repr(idx::UInt128, N_total::Int)
-    chars = Vector{Char}(undef, N_total)
-    for q in 1:N_total
-        mask = UInt128(1) << (q-1)
-        chars[q] = ((idx & mask) != 0) ? '1' : '0'
-    end
-    return join(reverse(chars))
-end
 
 ################################################################################
 println("\n--- Analyzing Hubbard 2D Hamiltonian ---")
@@ -318,14 +311,17 @@ println("example basis (idx=$(idx)) -> ", bitstring_repr(idx, N_total))
 # build dense projector for n=4 (only if N_total small, default max_dense=16)
 P4 = projector_for_particle(4, N_total)
 
-# project Hamiltonian into the 4-electron sector (dense)
-H4 = project_H_to_sector_dense(H, 4)
-println("Projected H to n=4 sector has size: ", size(H4))
-evals4 = eigen(Hermitian(H4)).values
-println("Eigenvalues in n=4 sector:")
-for i in evals4
-    @printf("%12.8f\n", real(i))
+# project Hamiltonian into the 1,2,3,4-electron sectors (dense)
+sectors = [1, 2, 3, 4]
+for sector in sectors
+    Hn = project_H_to_sector_dense(H, sector)
+    println("Projected H to n=$(sector) sector has size: ", size(Hn))
+    evals = eigen(Hermitian(Hn)).values
+    println("Lowest Eigenvalue in n=$(sector) sector:")
+    @printf("%12.8f\n", minimum(evals))
+    
 end
+
 
 # --- main extraction given eigvecs and known N_total --------------------------
 println("\nAnalyzing full Hamiltonian eigensystem...")
@@ -353,11 +349,11 @@ for j in 1:dim
     popcounts[j] = popcount_u128(UInt128(j-1))
 end
 
+gs_inds = [1,2,3,4,5,6,7,8]  # IGNORE just for testing
 # For each ground eigenvector, compute expectation, variance, and top kets
 for (kcount, gi) in enumerate(gs_inds)
     psi = vecs[:, gi]                 # ground eigenvector (normalized)
     probs = abs2.(psi)                # probabilities in computational basis
-
     # expectation and variance of particle number
     n_expect = sum(probs .* popcounts)
     n2_expect = sum(probs .* (popcounts .^ 2))
@@ -379,11 +375,14 @@ for (kcount, gi) in enumerate(gs_inds)
     println("  Most-weighted basis ket: |", top_bitstr, "⟩  with probability ", top_prob)
 
     # show top few basis amplitudes (sorted)
-    K = min(8, dim)  # how many to show
+    K = min(8, dim)  # how many to show?
     idxs = partialsortperm(probs, rev=true, 1:K)  # indices of top K probabilities
     println("  Top basis kets (index -> bitstring : amplitude (abs) , probability):")
+    sum_prob = 0.0
     for j in idxs
         bidx = UInt128(j-1)
         println("    $(j-1) -> |", bitstring_repr(bidx, N_total), "⟩ : ", abs(psi[j]), ", ", probs[j])
+        sum_prob += probs[j]
     end
+    println("    (sum of shown probabilities = ", sum_prob, ")")
 end

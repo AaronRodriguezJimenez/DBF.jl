@@ -6,15 +6,54 @@ using LinearAlgebra
 using Test
 using Plots
 
+"""
+    particle_ket(N::Int, Nparticles::Int; mode=:first)
 
+Return a `Ket` of length `N` with exactly `Nparticles` ones.
+
+`mode` options:
+  • `:first`   → first `Nparticles` sites occupied (|111000...>)
+  • `:random`  → random positions for the 1s
+  • `:alternate` → alternating pattern |101010...> (if Nparticles ≈ N/2)
+
+If the alternating pattern has more or fewer 1s than `Nparticles`,
+the result is truncated or padded with zeros.
+"""
+function particle_ket(N::Int, Nparticles::Int; mode=:first)
+    @assert 0 ≤ Nparticles ≤ N "Number of particles must be between 0 and N"
+    occ = zeros(Int, N)
+
+    if mode == :random
+        occ[randperm(N)[1:Nparticles]] .= 1
+
+    elseif mode == :alternate
+        occ[1:2:N] .= 1  # pattern 1,0,1,0,...
+        # adjust to requested number of particles
+        n1 = count(==(1), occ)
+        if n1 > Nparticles
+            # trim some 1s from the end
+            idxs = findall(==(1), occ)
+            occ[idxs[(Nparticles+1):end]] .= 0
+        elseif n1 < Nparticles
+            # add 1s where there are zeros
+            idxs = findall(==(0), occ)
+            occ[idxs[1:(Nparticles - n1)]] .= 1
+        end
+
+    else  # :first
+        occ[1:Nparticles] .= 1
+    end
+
+    return Ket(occ)
+end
 
 function run(; U=U, threshold=1e-3, wmax=nothing, wtype=0)
     # Parameters for Hubbard model
-    Lx = 2
-    Ly = 2
+    Lx = 4
+    Ly = 1
     Nsites = Lx * Ly
     N = 2 * Nsites   # 2 spin states per site
-    t = 0.1
+    t = 1.0
     H = DBF.fermi_hubbard_2D(Lx, Ly, t, U)
     #H = DBF.fermi_hubbard_2D_snake(Lx, Ly, t, U; snake_ordering=true)
     #H = DBF.hubbard_model_1D(Nsites, t, U)
@@ -26,12 +65,12 @@ function run(; U=U, threshold=1e-3, wmax=nothing, wtype=0)
     evals = eigvals(Hmat)
     groundE = minimum(evals)
 
-    #ψ = Ket{N}(0)
-    #ψ = Ket([i%2 for i in 1:N])
-    #kidx = argmin([real(expectation_value(H,Ket{N}(ψi))) for ψi in 1:2^N])
-    #kidx = argmin([real(expectation_value(H,Ket{N}(ψi-1))) for ψi in 1:2^N])
-    #ψ = Ket{N}(kidx)
-    ψ = Ket{N}(18)
+    # Initial state: half-filling
+    Nparticles = Nsites ÷ 2
+    #ψ = particle_ket(N, Nparticles, mode=:random)
+    #ψ = particle_ket(N, Nparticles, mode=:first)
+    #ψ = particle_ket(N, Nparticles, mode=:alternate)
+    ψ = Ket{N}(153)
     display(ψ)
     e0 = expectation_value(H,ψ)
    
@@ -105,8 +144,8 @@ end
 =#
 #run(U=0.001, threshold=1e-3, wmax=4, wtype=1)
 
-us = [0.001, 0.09, 0.5]
-#us = [0.0, 0.5, 1.0, 1.5]
+#us = [0.001, 0.09, 0.5]
+us = [1.0]#, 1.5]
 threshs = [1e-2, 1e-3, 1e-4, 1e-5, 1e-6, 1e-8]
 Pweights = [2, 3, 4, 5, 6, 7, 8]
 Mweights = [2, 3, 4, 5, 6, 7, 8]
