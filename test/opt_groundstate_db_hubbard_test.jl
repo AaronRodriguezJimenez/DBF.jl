@@ -6,36 +6,72 @@ using LinearAlgebra
 using Test
 using JLD2
 
-function run()
+function particle_ket(N::Int, Nparticles::Int; mode=:first)
+    @assert 0 ≤ Nparticles ≤ N "Number of particles must be between 0 and N"
+    occ = zeros(Int, N)
 
+    if mode == :random
+        occ[randperm(N)[1:Nparticles]] .= 1
+
+    elseif mode == :alternate
+        occ[1:2:N] .= 1  # pattern 1,0,1,0,...
+        # adjust to requested number of particles
+        n1 = count(==(1), occ)
+        if n1 > Nparticles
+            # trim some 1s from the end
+            idxs = findall(==(1), occ)
+            occ[idxs[(Nparticles+1):end]] .= 0
+        elseif n1 < Nparticles
+            # add 1s where there are zeros
+            idxs = findall(==(0), occ)
+            occ[idxs[1:(Nparticles - n1)]] .= 1
+        end
+
+    else  # :first
+        occ[1:Nparticles] .= 1
+    end
+
+    return Ket(occ)
+end
+
+
+function run()
     g = Any[]
     θ = Float64[]
     H = Any[]
 
-    N = 4 
-    Random.seed!(2)
-    H = DBF.heisenberg_1D(N, -1, -1, -1, x=.1)
-    # H = DBF.heisenberg_2D(2, 2, -1, -1, -1, z=.1)
-    # H = DBF.heisenberg_2D(7, 7, -0, -0, -1, x=.1)
-    DBF.coeff_clip!(H)
+     # Parameters for Hubbard model
+    Lx = 2
+    Ly = 2
+    Nsites = Lx * Ly
+    N = 2 * Nsites   # 2 spin states per site
+    t = 1.0
+    U = 1.0
+    H = DBF.fermi_hubbard_2D(Lx, Ly, t, U)
+    #H = DBF.fermi_hubbard_2D_snake(Lx, Ly, t, U; snake_ordering=true)
+    #H = DBF.hubbard_model_1D(Nsites, t, U)
+
+    #DBF.coeff_clip!(H)
    
     # Transform H to make |000> the most stable bitstring
-    for i in 1:N
-        if i%2 == 0
-            H = Pauli(N, X=[i]) * H * Pauli(N, X=[i])
-        end
-    end 
+    #for i in 1:N
+    #    if i%2 == 0
+    #        H = Pauli(N, X=[i]) * H * Pauli(N, X=[i])
+    #    end
+    #end 
     
     H0 = deepcopy(H)
-    # display(H)
+    display(H)
     
     # ψ = Ket([i%2 for i in 1:N])
-    ψ = Ket([0 for i in 1:N])
+    #ψ = Ket([0 for i in 1:N])
     # ψ += Ket([i%2 for i in 0:N-1])
     # PauliOperators.scale!(ψ, 1/norm(ψ))
 
     # kidx = argmin([real(expectation_value(H,Ket{N}(ψi))) for ψi in 1:2^N])
-    # ψ = Ket{N}(kidx)
+    #Nparticles = 2*Nsites ÷ 2
+    #ψ = particle_ket(N, Nparticles, mode=:random)
+    ψ = Ket{N}(1)
     display(ψ)
     e0 = expectation_value(H,ψ)
     
@@ -45,15 +81,15 @@ function run()
 
     @show norm(H)
     
-    @time res = DBF.dbf_groundstate(H, ψ, 
+    @time res = DBF.dbf_groundstate_test(H, ψ, 
                                 verbose=1, 
-                                max_iter=120, conv_thresh=1e-3, 
-                                evolve_coeff_thresh=1e-4,
-                                grad_coeff_thresh=1e-5,
-                                energy_lowering_thresh=1e-5,
+                                max_iter=120, conv_thresh=1e-6, 
+                                evolve_coeff_thresh=1e-6,
+                                grad_coeff_thresh=1e-6,
+                                energy_lowering_thresh=1e-6,
                                 clifford_check=true,
-                                compute_pt2_error=true,
-                                max_rots_per_grad=50)
+                                compute_pt2_error=false,
+                                max_rots_per_grad=100)
     g = vcat(g, res["generators"])
     θ = vcat(θ, res["angles"])
     H = res["hamiltonian"]
@@ -144,7 +180,7 @@ function run()
         push!(basis, k)
     end
     H = Matrix(Ht,basis)
-    display(eigvals(H)[1:10]) 
+    display(eigvals(H)[1:5]) 
     display(basis[1])
     v = H[1,2:end]
     d = e0 .- diag(H)[2:end]

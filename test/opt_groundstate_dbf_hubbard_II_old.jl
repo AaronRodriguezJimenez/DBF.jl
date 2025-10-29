@@ -202,229 +202,245 @@ end
       Strong coupling regime: t=0.1, U=0.5   
 =#
 us = [0.5]
-threshs = [1e-2]#, 1e-3, 1e-4, 1e-5, 1e-6, 1e-8]
+threshs = [1e-2, 1e-3]
 Pweights = [2, 3, 4, 5, 6, 7, 8]
 Mweights = [2, 3, 4, 5, 6, 7, 8]
 
-Pauli_variances = Dict{String,Float64}()
+# Persistent accumulators for comparison plots (label -> variance)
+Pauli_variances   = Dict{String,Float64}()
 Majorana_variances = Dict{String,Float64}()
 
-variance_list = Float64[]
-variance_list_Majorana = Float64[]
-dbfEs_list = Vector{Float64}[]
-nterms_list = Vector{Int}[]
-loss_list = Vector{Float64}[]
-
 read_from_file = false
+
+# Helper: produce a safe scientific-string for filenames
+safe_sci(x) = @sprintf("%.0e", x)    # e.g. 1e-02
+
+# Helper: parse "th=..., w=..." label -> (th, w)
+function parse_th_w(label::String)
+    m = match(r"th=([0-9.eE+-]+),\s*w=([0-9]+)", label)
+    if m !== nothing
+        th = parse(Float64, m.captures[1])
+        w  = parse(Int,    m.captures[2])
+        return (th, w)
+    else
+        return (Inf, Inf)
+    end
+end
 
 for U in us
     println("========================================")
     println(" U = ", U)
     println("========================================")
     println("---- Coefficient Thresholding Only ----")
+
+    # Per-experiment lists (typed)
+    variance_list = Float64[]                 # scalar per threshold
+    dbfEs_list    = Vector{Float64}[]         # list-of-vectors
+    nterms_list   = Vector{Int}[]             # list-of-vectors (or could be scalars)
+    loss_list     = Vector{Float64}[]         # list-of-vectors
+    labels_list   = String[]                  # one label per threshold
+
+    # --- Coefficient-only sweep ---
     for thresh in threshs
         var, dbfEs, nterms, loss = run(U=U, threshold=thresh, wmax=nothing, wtype=0, read_from_file=read_from_file)
 
-        println("dbfEs type: ", typeof(dbfEs), " length: ", length(dbfEs))
-        println(" nterms type: ", typeof(nterms), " length: ", (isa(nterms, AbstractArray) ? length(nterms) : 1))
-        println(" loss  type: ", typeof(loss), " length: ", (isa(loss, AbstractArray) ? length(loss) : 1))
+        # Print debugging info (useful to confirm shapes)
+        println("th = ", thresh)
+        println(" dbfEs type: ", typeof(dbfEs), " length: ", (isa(dbfEs,AbstractArray) ? length(dbfEs) : 1))
+        println(" nterms type: ", typeof(nterms), " length: ", (isa(nterms,AbstractArray) ? length(nterms) : 1))
+        println(" loss  type: ", typeof(loss), " length: ", (isa(loss,AbstractArray) ? length(loss) : 1))
         println(" var   type: ", typeof(var))
-    
 
         push!(variance_list, var)
         push!(dbfEs_list, dbfEs)
-        push!(nterms_list, nterms)
-        push!(loss_list, loss)
+        push!(nterms_list, isa(nterms,AbstractArray) ? nterms : [nterms])  # normalize to vector
+        push!(loss_list,    isa(loss,AbstractArray)  ? loss  : [loss])
+        push!(labels_list, @sprintf("th=%.0e", thresh))
+
         @printf(" Variance with coeff thresholding only (th=%1.1e): %1.5e\n", thresh, var)
-
     end
-    # Overlay plots
-    plt = plot()
-    plt1 = plot()
-    plt2 = plot()
-    plt3 = plot()
-    for (i, dbfEs) in enumerate(dbfEs_list)
-        steps = collect(1:length(dbfEs))
-        plot!(plt, steps, dbfEs, lw=2, label="th=$(threshs[i])")#, markershape=:circle)
-        plot!(plt1, steps, nterms_list[i], lw=2, label="th=$(threshs[i])")#, markershape=:circle)
-        plot!(plt2, steps, loss_list[i], lw=2, label="th=$(threshs[i])")#, markershape=:circle)
+
+    # Overlay plots for coefficient-only
+    pltE = plot()
+    pltN = plot()
+    pltL = plot()
+    for i in 1:length(dbfEs_list)
+        dbfEs = dbfEs_list[i]
+        if !(isa(dbfEs, AbstractVector) && length(dbfEs) > 0)
+            @warn "dbfEs for index $i is not a non-empty vector; skipping"
+            continue
+        end
+        steps = 1:length(dbfEs)
+        label = labels_list[i]
+
+        plot!(pltE, steps, dbfEs, lw=2, label=label)
+        # nterms_list[i] is normalized to vector
+        if length(nterms_list[i]) == length(steps)
+            plot!(pltN, steps, nterms_list[i], lw=2, label=label)
+        else
+            plot!(pltN, steps, fill(nterms_list[i][1], length(steps)), lw=2, label=label)
+        end
+
+        if length(loss_list[i]) == length(steps)
+            plot!(pltL, steps, loss_list[i], lw=2, label=label)
+        else
+            plot!(pltL, steps, fill(loss_list[i][1], length(steps)), lw=2, label=label)
+        end
     end
-    steps = collect(1:length(variance_list))
-    plot!(plt3, steps, variance_list, lw=2, label="Variance", color=:gray)
-    
-    xlabel!(plt, "DBF Step")
-    ylabel!(plt, "DBF Energy Estimate (a.u.)")
-    savefig(plt, "Energies_U=$(U)_th=varied_w=None.pdf")
 
-    xlabel!(plt1, "DBF Step")
-    ylabel!(plt1, "Number of Terms")
-    savefig(plt1, "N-Terms_U=$(U)_th=varied_w=None.pdf")
+    xlabel!(pltE, "DBF Step"); ylabel!(pltE, "DBF Energy Estimate (a.u.)")
+    savefig(pltE, "Energies_U=$(U)_th=varied_w=None.pdf")
 
-    xlabel!(plt2, "DBF Step")
-    ylabel!(plt2, "Loss (1 - HS-norm^2)")
-    savefig(plt2, "Loss_U=$(U)_th=varied_w=None.pdf")
+    xlabel!(pltN, "DBF Step"); ylabel!(pltN, "Number of Terms")
+    savefig(pltN, "Nterms_U=$(U)_th=varied_w=None.pdf")
 
-    xlabel!(plt3, "Experiment ")
-    ylabel!(plt3, "Variance")
-    savefig(plt3, "Variance_U=$(U)_th=varied_w=None.pdf")   
+    xlabel!(pltL, "DBF Step"); ylabel!(pltL, "Loss (1 - HS-norm^2)")
+    savefig(pltL, "Loss_U=$(U)_th=varied_w=None.pdf")
 
-   #- Clean data lists for next round
-    empty!(variance_list)
-    empty!(dbfEs_list)
-    empty!(nterms_list)
-    empty!(loss_list)   
+    # a simple variance vs experiment plot
+    pltVar = plot(1:length(variance_list), variance_list, lw=2, marker=:circle, label="Variance")
+    xlabel!(pltVar, "Experiment index"); ylabel!(pltVar, "Variance")
+    savefig(pltVar, "Variance_U=$(U)_th=varied_w=None.pdf")
 
+    # --- Coefficient + Pauli weight sweep (make one overlay per threshold) ---
     println("---- Coefficient + Pauli Weight Thresholding ----")
-    labels_list  = String[]
 
     for thresh in threshs
+        # per-threshold typed containers
+        variance_list_th = Float64[]
+        dbfEs_list_th    = Vector{Float64}[]
+        nterms_list_th   = Vector{Int}[]
+        loss_list_th     = Vector{Float64}[]
+        labels_list_th   = String[]
+
         for wmax in Pweights
-            # run returns varianceP, dbfEs, nterms, loss, groundE
             varianceP, dbfEs, nterms, loss = run(U=U, threshold=thresh, wmax=wmax, wtype=0, read_from_file=read_from_file)
 
-            # push per-run lists (if you need them for overlay plotting)
-            push!(variance_list, varianceP)
-            push!(dbfEs_list, dbfEs)
-            push!(nterms_list, nterms)
-            push!(loss_list, loss)
-            push!(labels_list, "th=$(thresh), w=$(wmax)")
+            push!(variance_list_th, varianceP)
+            push!(dbfEs_list_th, isa(dbfEs,AbstractArray) ? dbfEs : [dbfEs])
+            push!(nterms_list_th, isa(nterms,AbstractArray) ? nterms : [nterms])
+            push!(loss_list_th,   isa(loss,AbstractArray)  ? loss  : [loss])
+            push!(labels_list_th, @sprintf("th=%.0e, w=%d", thresh, wmax))
 
-            # save summary into persistent dict (label -> error)
-            lbl = "th=$(thresh), w=$(wmax)"
+            lbl = @sprintf("th=%.0e, w=%d", thresh, wmax)
             Pauli_variances[lbl] = varianceP
             @printf(" Variance with coeff (th=%1.1e) + Pauli weight (w=%d): %1.5e\n", thresh, wmax, varianceP)
         end
-        # Overlay plots (unchanged logic, using dbfEs_list, nterms_list, loss_list)
-        plt = plot() 
-        plt1 = plot()
-        plt2 = plot()
-        for (i, dbfEs) in enumerate(dbfEs_list)
-            steps = collect(1:length(dbfEs))
-            lbl = labels_list[i]
-            plot!(plt, steps, dbfEs, lw=2, label=lbl)
-            plot!(plt1, steps, nterms_list[i], lw=2, label=lbl)
-            plot!(plt2, steps, loss_list[i], lw=2, label=lbl)
+
+        # overlay plots for this thresh (Pauli)
+        pltE = plot()
+        pltN = plot()
+        pltL = plot()
+        for i in 1:length(dbfEs_list_th)
+            dbfEs = dbfEs_list_th[i]
+            if !(isa(dbfEs, AbstractVector) && length(dbfEs) > 0)
+                @warn "dbfEs for index $i is not a vector; skipping"
+                continue
+            end
+            steps = 1:length(dbfEs)
+            label = labels_list_th[i]
+            plot!(pltE, steps, dbfEs, lw=2, label=label)
+            nvec = nterms_list_th[i]; lvec = loss_list_th[i]
+            plot!(pltN, steps, length(nvec)==length(steps) ? nvec : fill(first(nvec), length(steps)), lw=2, label=label)
+            plot!(pltL, steps, length(lvec)==length(steps) ? lvec : fill(first(lvec), length(steps)), lw=2, label=label)
         end
 
-        xlabel!(plt, "DBF Step"); ylabel!(plt, "DBF Energy Estimate (a.u.)")
-        savefig(plt, "Energies_U=$(U)_th=varied_w=Pauli.pdf")
+        xlabel!(pltE, "DBF Step"); ylabel!(pltE, "DBF Energy Estimate (a.u.)")
+        safe_th = safe_sci(thresh)
+        savefig(pltE, "Energies_U=$(U)_th=$(safe_th)_Pauli.pdf")
 
-        xlabel!(plt1, "DBF Step"); ylabel!(plt1, "Number of Terms")
-        savefig(plt1, "N-Terms_U=$(U)_th=varied_w=Pauli.pdf")
+        xlabel!(pltN, "DBF Step"); ylabel!(pltN, "Number of Terms")
+        savefig(pltN, "Nterms_U=$(U)_th=$(safe_th)_Pauli.pdf")
 
-        xlabel!(plt2, "DBF Step"); ylabel!(plt2, "Loss (1 - HS-norm^2)")
-        savefig(plt2, "Loss_U=$(U)_th=varied_w=Pauli.pdf")
-
-        #- Clean transient data lists for next threshold round (keeps Pauli_variances dict)
-        empty!(variance_list)
-        empty!(dbfEs_list)
-        empty!(nterms_list)
-        empty!(loss_list)
+        xlabel!(pltL, "DBF Step"); ylabel!(pltL, "Loss (1 - HS-norm^2)")
+        savefig(pltL, "Loss_U=$(U)_th=$(safe_th)_Pauli.pdf")
     end
 
+    # --- Coefficient + Majorana weight sweep ---
     println("---- Coefficient + Majorana Weight Thresholding ----")
-    empty!(labels_list)
-
     for thresh in threshs
+        variance_list_th = Float64[]
+        dbfEs_list_th    = Vector{Float64}[]
+        nterms_list_th   = Vector{Int}[]
+        loss_list_th     = Vector{Float64}[]
+        labels_list_th   = String[]
+
         for wmax in Mweights
             varianceM, dbfEs, nterms, loss = run(U=U, threshold=thresh, wmax=wmax, wtype=1, read_from_file=read_from_file)
-            push!(variance_list_Majorana, varianceM)
-            push!(dbfEs_list, dbfEs)
-            push!(nterms_list, nterms)
-            push!(loss_list, loss)
-            push!(labels_list, "th=$(thresh), w=$(wmax)")
 
-            lbl = "th=$(thresh), w=$(wmax)"
+            push!(variance_list_th, varianceM)
+            push!(dbfEs_list_th, isa(dbfEs,AbstractArray) ? dbfEs : [dbfEs])
+            push!(nterms_list_th, isa(nterms,AbstractArray) ? nterms : [nterms])
+            push!(loss_list_th,   isa(loss,AbstractArray)  ? loss  : [loss])
+            push!(labels_list_th, @sprintf("th=%.0e, w=%d", thresh, wmax))
+
+            lbl = @sprintf("th=%.0e, w=%d", thresh, wmax)
             Majorana_variances[lbl] = varianceM
-
             @printf(" Variance with coeff (th=%1.1e) + Majorana weight (w=%d): %1.5e\n", thresh, wmax, varianceM)
         end
 
-        # Overlay plots for Majorana (keep file names different to avoid overwriting)
-        plt = plot()
-        plt1 = plot()
-        plt2 = plot()
-
-        for (i, dbfEs) in enumerate(dbfEs_list)
-            steps = collect(1:length(dbfEs))
-            lbl = labels_list[i]
-            # NOTE: using Mweights / threshs for labels could be more accurate here;
-            # keep the pattern similar to the Pauli block.
-            plot!(plt, steps, dbfEs, lw=2, label=lbl)
-            plot!(plt1, steps, nterms_list[i], lw=2, label=lbl)
-            plot!(plt2, steps, loss_list[i], lw=2, label=lbl)
+        # overlay plots for this thresh (Majorana)
+        pltE = plot()
+        pltN = plot()
+        pltL = plot()
+        for i in 1:length(dbfEs_list_th)
+            dbfEs = dbfEs_list_th[i]
+            if !(isa(dbfEs, AbstractVector) && length(dbfEs) > 0)
+                @warn "dbfEs for index $i is not a vector; skipping"
+                continue
+            end
+            steps = 1:length(dbfEs)
+            label = labels_list_th[i]
+            plot!(pltE, steps, dbfEs, lw=2, label=label)
+            nvec = nterms_list_th[i]; lvec = loss_list_th[i]
+            plot!(pltN, steps, length(nvec)==length(steps) ? nvec : fill(first(nvec), length(steps)), lw=2, label=label)
+            plot!(pltL, steps, length(lvec)==length(steps) ? lvec : fill(first(lvec), length(steps)), lw=2, label=label)
         end
 
-        xlabel!(plt, "DBF Step"); ylabel!(plt, "DBF Energy Estimate (a.u.)")
-        savefig(plt, "Energies_U=$(U)_th=varied_w=Majorana.pdf")
+        xlabel!(pltE, "DBF Step"); ylabel!(pltE, "DBF Energy Estimate (a.u.)")
+        safe_th = safe_sci(thresh)
+        savefig(pltE, "Energies_U=$(U)_th=$(safe_th)_Majorana.pdf")
 
-        xlabel!(plt1, "DBF Step"); ylabel!(plt1, "Number of Terms")
-        savefig(plt1, "N-Terms_U=$(U)_th=varied_w=Majorana.pdf")
+        xlabel!(pltN, "DBF Step"); ylabel!(pltN, "Number of Terms")
+        savefig(pltN, "Nterms_U=$(U)_th=$(safe_th)_Majorana.pdf")
 
-        xlabel!(plt2, "DBF Step"); ylabel!(plt2, "Loss (1 - HS-norm^2)")
-        savefig(plt2, "Loss_U=$(U)_th=varied_w=Majorana.pdf")
-
-    #- Clean transient lists (persisted summaries remain in Majorana_variances)
-        empty!(variance_list_Majorana)
-        empty!(dbfEs_list)
-        empty!(nterms_list)
-        empty!(loss_list)
+        xlabel!(pltL, "DBF Step"); ylabel!(pltL, "Loss (1 - HS-norm^2)")
+        savefig(pltL, "Loss_U=$(U)_th=$(safe_th)_Majorana.pdf")
     end
 
-    # --- Collect all unique labels ---
+    # --- Comparison bar chart of all stored variances ---
     all_labels = collect(union(keys(Pauli_variances), keys(Majorana_variances)))
-
-    # --- Define a helper to extract numeric th and w from each label safely ---
-    function parse_th_w(label::String)
-        m = match(r"th=([0-9.eE+-]+), w=([0-9]+)", label)
-        if m !== nothing
-            th = parse(Float64, m.captures[1])
-            w  = parse(Int,    m.captures[2])
-            return (th, w)
-        else
-            # fallback in case the label format is unexpected
-            return (Inf, Inf)
-        end
-    end
-    # --- Sort labels numerically by threshold, then weight ---
     all_labels = sort(all_labels, by = l -> parse_th_w(l))
 
-    # --- Now build your arrays using the new sorted order ---
     pauli_vals    = [get(Pauli_variances, l, NaN) for l in all_labels]
     majorana_vals = [get(Majorana_variances, l, NaN) for l in all_labels]
 
-    println("All labels: ", all_labels)
+    # choose visible colors and reasonable fonts for readability
+    pltBar = bar(
+        all_labels,
+        [pauli_vals majorana_vals],
+        label = ["Pauli" "Majorana"],
+        bar_width = 0.6,
+        legend = :topright,
+        rotation = 45,
+        size = (1400, 900),
+        xlabel = "Threshold / Weight Combination",
+        ylabel = "Variance",
+        title  = "Pauli vs Majorana Variances (U=$(U))",
+        color = [:white :lightgray],
+        linecolor = :black,
+        linewidth = 0.3,
+        titlefont = 14,
+        guidefont = 12,
+        tickfont  = 10,
+        left_margin=15*Plots.mm,
+        bottom_margin=30*Plots.mm,
+    )
 
-    # Plot grouped bars
-    bar(
-    all_labels,
-    [pauli_vals majorana_vals],
-    label = ["Pauli" "Majorana"],
-    bar_width = 0.6,
-    legend = :topright,
-    legendfontsize = 30,         # larger legend text
-    rotation = 45,
-    size = (3500, 3000),
-    xlabel = "Threshold / Weight Combination",
-    ylabel = "Variance",
-    title  = "Pauli vs Majorana Variances (U=$(U))",
-    color = [:white :lightgray], # white and light gray bars
-    linecolor = :black,
-    linewidth = 0.2,
-    # 👇 make everything readable
-    titlefont = 50,
-    guidefont = 50,              # affects xlabel & ylabel fonts
-    tickfont  = 30,              # affects bar tick labels
-    left_margin=25*Plots.mm,
-    right_margin=25*Plots.mm,
-    top_margin=30*Plots.mm,
-    bottom_margin=50*Plots.mm,
-)
-
-    savefig("Variances_Comparison_U=$(U).pdf")
+    savefig(pltBar, "Variances_Comparison_U=$(U).pdf")
     println("Saved comparison chart to Variances_Comparison_U=$(U).pdf")
-    # Clear dicts for next U value
+
+    # clear the dicts for next U
     empty!(Pauli_variances)
     empty!(Majorana_variances)
-
 end
