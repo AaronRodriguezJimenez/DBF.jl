@@ -253,9 +253,9 @@ function fermi_hubbard_2D_zigzag(Lx::Int, Ly::Int, t::Float64, U::Float64)
 
     # HOPPING: loop nearest-neighbour pairs once, add c_i^† c_j + c_j^† c_i (both spins)
     for y in 1:Ly, x in 1:Lx
-        println(x, "  ", y)
+        #println(x, "  ", y)
         jsite = linear_index(x, y)
-        display(jsite)
+        #display(jsite)
          # neighbor +x (right in x)
         if x < Lx
             isite = linear_index(x + 1, y)

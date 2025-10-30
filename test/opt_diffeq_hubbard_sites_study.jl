@@ -48,7 +48,7 @@ Return a `Ket` of length `N` with exactly `Nparticles` ones.
 If the alternating pattern has more or fewer 1s than `Nparticles`,
 the result is truncated or padded with zeros.
 """
-function particle_ket(N::Int, Nparticles::Int, Sz::Int; mode=:first)
+function particle_ket(N::Int, Nparticles::Int; mode=:first)
     @assert 0 ≤ Nparticles ≤ N "Number of particles must be between 0 and N"
     occ = zeros(Int, N)
 
@@ -71,9 +71,6 @@ function particle_ket(N::Int, Nparticles::Int, Sz::Int; mode=:first)
 
     elseif mode == :first
         occ[1:Nparticles] .= 1
-
-    elseif mode == :subspace
-
 
     else 
         error("Unknown mode: $mode")
