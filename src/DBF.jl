@@ -39,4 +39,12 @@ export Z_gate
 export S_gate 
 export T_gate 
 
+include("lattices/Lattices.jl")  # defines submodule
+using .Lattices                  # make it accessible inside QuantumChemQC
+using  Graphs
+export Lattices
+export LatticeBond, Lattice
+export lattice2graph, dec2bin, bin2dec, bin2bonds!
+export square_lattice, build_square_lattice
+
 end
