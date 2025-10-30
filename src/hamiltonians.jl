@@ -370,3 +370,57 @@ function graph_adjacency(O::PauliSum{N,T}) where {N,T}
     
     return A 
 end 
+
+
+#
+# - - - Fermi-Hubbard from lattice - - -
+#
+"""
+    fermi_hubbard_from_lattice(lattice, t, U; eps_coeff=1e-12)
+
+Build a 2D Fermi-Hubbard Hamiltonian (PauliSum) from a lattice object.
+
+Arguments
+- `lattice` : an iterable of bond objects (each bond should expose `.s1` and `.s2` site identifiers).
+- `t`       : hopping amplitude (real).
+- `U`       : on-site interaction strength (real).
+
+Keyword
+- `eps_coeff` : threshold for coefficient clipping (default 1e-12).
+
+Returns
+- `H::PauliSum` : the Hamiltonian in PauliSum form using JW mapping.
+"""
+function fermi_hubbard_from_lattice(Lx, Ly, t, U)
+
+    lattice = build_square_lattice(Lx, Ly; layout = :zigzag, order = :row,
+                                   xperiodic = false, yperiodic = false)
+    N = Lx * Ly
+    N_total = 2 * N  # Total number of spin-orbitals
+    H = PauliOperators.PauliSum(N_total, Float64)
+
+    # Hopping terms
+    for b in lattice
+        s1_up = 2 * (b.s1 - 1) + 1  # Up spin site index
+        s1_dn = 2 * (b.s1 - 1) + 2  # Down spin site index
+        s2_up = 2 * (b.s2 - 1) + 1  # Up spin site index
+        s2_dn = 2 * (b.s2 - 1) + 2  # Down spin site index
+        # Up spin hopping
+        term = DBF.JWmapping(N_total, i=s1_up, j=s2_up) + DBF.JWmapping(N_total, i=s2_up, j=s1_up)
+        H += -t * term
+        # Down spin hopping
+        term = DBF.JWmapping(N_total, i=s1_dn, j=s2_dn) + DBF.JWmapping(N_total, i=s2_dn, j=s1_dn)
+        H += -t * term
+    end
+    # On-site interaction terms
+    for n in 1:N
+        up_index = 2 * (n - 1) + 1
+        dn_index = 2 * (n - 1) + 2
+        term = DBF.JWmapping(N_total, i=up_index, j=up_index) * DBF.JWmapping(N_total, i=dn_index, j=dn_index)
+        H += U * term
+    end
+
+    DBF.coeff_clip!(H)
+    return H
+
+end

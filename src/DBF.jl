@@ -40,4 +40,12 @@ export T_gate
 export adapt_fermion
 export dbf_groundstate_test
 
+include("lattices/Lattices.jl")  # defines submodule
+using .Lattices                  # make it accessible inside QuantumChemQC
+using  Graphs
+export Lattices
+export LatticeBond, Lattice
+export lattice2graph, dec2bin, bin2dec, bin2bonds!
+export square_lattice, build_square_lattice
+
 end
