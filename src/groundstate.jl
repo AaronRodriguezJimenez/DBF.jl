@@ -1077,3 +1077,74 @@ function groundstate_diffeq_test(Oin::PauliSum{N,T}, ψ::Ket{N};
     end
     return O, generators, angles
 end
+
+"""
+   Matrix version of diffeq for small systems
+    gne :: Exact grround state energy for reference.
+"""
+function groundstate_diffeq_matrix(Oin::PauliSum{N,T}, ψ::Ket{N}; 
+            n_body = 2,
+            max_iter=10, gne=-1.000, verbose=1, conv_thresh=1e-3,
+            stepsize = .01) where {N,T}
+
+
+    O = deepcopy(Oin)
+
+    # Define the source operator that is an n-body approximation to |00><00|
+    if n_body == 0
+        P = zeros(2^N, 2^N) ; P[1,1] = 1.0 #Exact projector
+    else
+        S = create_0_projector(N,n_body)
+        P = Matrix(S)
+    end
+
+    O_mat = Matrix(O)
+
+    #Normalize projector
+    P = P / tr(P)
+    
+    # Double bracket
+    # deriv returns [H,[H,P]]
+    function deriv(H::AbstractMatrix, P::AbstractMatrix)
+        G = H*P - P*H
+        return H*G - G*H
+    end
+
+    verbose < 1 || @printf(" %6s", "Iter")
+    verbose < 1 || @printf(" %12s", "<ψ|H|ψ>")
+    verbose < 1 || @printf(" %12s", "Error")
+    verbose < 1 || @printf(" %12s", "||<[H,Gi]>||")
+    verbose < 1 || @printf(" %12s", "|H|")
+    verbose < 1 || @printf("\n")
+
+    # Euler integrate the flow: dO/dt = -[H,[H,O]]
+    for iter in 1:max_iter
+        dO = deriv(O_mat, P)
+        O_mat += dO*stepsize
+
+        # Energy estimate
+        ecurr = -real(tr(P*O_mat))
+        err = abs(ecurr - gne)
+
+        # Norms
+        norm_new = norm(P*dO)
+        norm_op = norm(P*O_mat)
+
+        verbose < 1 || @printf("*%6i", iter)
+        verbose < 1 || @printf(" %12.8f", ecurr)
+        verbose < 1 || @printf(" %12.8f", err)
+        #verbose < 1 || @printf(" %12.8f", norm_new)
+        #verbose < 1 || @printf(" %12.8f", norm_op)
+        verbose < 1 || @printf("\n")
+
+        if norm_new < conv_thresh
+            verbose < 1 || @printf(" Converged.\n")
+            break
+        end
+
+        if err < conv_thresh
+            verbose < 1 || @printf(" Energy converged.\n")
+            break
+        end
+    end
+end

@@ -317,11 +317,18 @@ for sector in sectors
     Hn = project_H_to_sector_dense(H, sector)
     println("Projected H to n=$(sector) sector has size: ", size(Hn))
     evals = eigen(Hermitian(Hn)).values
-    println("Lowest Eigenvalue in n=$(sector) sector:")
-    @printf("%12.8f\n", minimum(evals))
-    
+    println("Lowest Eigenvalues in n=$(sector) sector:")
+    for i in evals
+        @printf("%12.8f\n", real(i))
+    end
 end
-
+H4 = project_H_to_sector_dense(H, 2)
+println("Projected H to n=4 sector has size: ", size(H4))
+evals4 = eigen(Hermitian(H4)).values
+println("Lowest Eigenvalues in n=4 sector:")
+for i in evals4
+    @printf("%12.8f\n", real(i))
+end
 
 # --- main extraction given eigvecs and known N_total --------------------------
 println("\nAnalyzing full Hamiltonian eigensystem...")
@@ -349,7 +356,7 @@ for j in 1:dim
     popcounts[j] = popcount_u128(UInt128(j-1))
 end
 
-gs_inds = [1,2,3,4,5,6,7,8]  # IGNORE just for testing
+#gs_inds = [1,2,3,4,5,6,7,8]  # IGNORE just for testing
 # For each ground eigenvector, compute expectation, variance, and top kets
 for (kcount, gi) in enumerate(gs_inds)
     psi = vecs[:, gi]                 # ground eigenvector (normalized)
