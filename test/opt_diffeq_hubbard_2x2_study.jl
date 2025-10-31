@@ -5,6 +5,11 @@ using Random
 using LinearAlgebra
 using JLD2
 
+"""
+  Here we perform calculations for different approximations to the projector:
+  single particle, two particle, etc.
+  Using diffeq approach.
+"""
 
 # --- Helpers for particle counts / Sz ---
 
@@ -32,8 +37,6 @@ function indices_sector(basis::Vector{Vector{Int}}; N::Union{Int,Nothing}=nothin
     end
     return inds
 end
-
-
 
 """
     particle_ket(N::Int, Nparticles::Int; mode=:first)
