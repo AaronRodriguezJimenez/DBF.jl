@@ -82,127 +82,6 @@ function heisenberg_2D(Nx, Ny, Jx, Jy, Jz; x=0, y=0, z=0, periodic=true)
     return H
 end
 
-
-
-function heisenberg_2D_zigzag(Nx, Ny, Jx, Jy, Jz; x=0, y=0, z=0, periodic=true)
-    N_total = Nx * Ny
-    H = PauliSum(N_total, Float64)
-
-    # Zigzag (snake-like) row-major indexing
-    coord_to_index(i, j) = isodd(j) ? (j - 1) * Nx + i : j * Nx - i + 1
-
-    # Helper functions for periodic wrapping
-    right(i) = periodic ? (i % Nx) + 1 : (i < Nx ? i + 1 : nothing)
-    up(j) = periodic ? (j % Ny) + 1 : (j < Ny ? j + 1 : nothing)
-
-    # Nearest-neighbor interactions
-    for j in 1:Ny        # rows
-        for i in 1:Nx    # columns
-            current_site = coord_to_index(i, j)
-            # Right neighbor (i+1, j)
-            i_r = right(i)
-            if i_r !== nothing
-                right_site = coord_to_index(i_r, j)
-                # display(current_site)
-                # display(right_site)
-                # println("++++++++++")
-                H += -2*Jx * Pauli(N_total, X=[current_site, right_site])
-                H += -2*Jy * Pauli(N_total, Y=[current_site, right_site])
-                H += -2*Jz * Pauli(N_total, Z=[current_site, right_site])
-            end
-
-            # Up neighbor (i, j+1)
-            j_u = up(j)
-            if j_u !== nothing
-                up_site = coord_to_index(i, j_u)
-                # display(current_site)
-                # display(up_site)
-                # println("==============")
-                H += -2*Jx * Pauli(N_total, X=[current_site, up_site])
-                H += -2*Jy * Pauli(N_total, Y=[current_site, up_site])
-                H += -2*Jz * Pauli(N_total, Z=[current_site, up_site])
-            end
-        end
-    end
-
-    # External field terms
-    for site in 1:N_total
-        H += x * Pauli(N_total, X=[site])
-        H += y * Pauli(N_total, Y=[site])
-        H += z * Pauli(N_total, Z=[site])
-    end
-
-    return H
-end
-
-"""
- - - - Heisenberg model 2D (snake/zizag ordering) Not working with periodic. - - -
-"""
-function heisenberg_2D_snake(Lx::Int, Ly::Int, Jx::Float64, Jy::Float64, Jz::Float64; x=0, y=0, z=0, 
-                             periodic::Bool=false,  snake_ordering::Bool=false)
-    Nsites  = Lx * Ly
-    N_total = Nsites
-    H = PauliSum(N_total, Float64)
-
-    # Spin indices for site j (1-based site indexing)
-    up(j) = j
-    dn(j) = j + Nsites
-
-    # Map (row x, col y) -> site index j in [1, Nsites]
-    @inline function site_index(x::Int, y::Int)
-        if !snake_ordering
-            # Row-major
-            return (x - 1) * Ly + y
-        else
-            # Snake (zigzag) row-major:
-            # odd rows (x=1,3,...) go left->right
-            # even rows (x=2,4,...) go right->left
-            if isodd(x)
-                return (x - 1) * Ly + y
-            else
-                return x * Ly - (y - 1)
-            end
-        end
-    end
-
-    # Nearest-neighbor interactions
-    for j in 1:Ly  # Row index
-        for i in 1:Lx  # Column index
-            current_site = site_index(i, j)
-            
-            # Right neighbor (i+1, j)
-            if i < Lx || periodic
-                right_i = periodic ? (i + 1) % Lx : i + 1
-                right_site = site_index(right_i, j)
-                
-                H += -2*Jx * Pauli(N_total, X=[current_site, right_site])
-                H += -2*Jy * Pauli(N_total, Y=[current_site, right_site])
-                H += -2*Jz * Pauli(N_total, Z=[current_site, right_site])
-            end
-            
-            # Up neighbor (i, j+1)  
-            if j < Ly || periodic
-                up_j = periodic ? (j + 1) % Ly : j + 1
-                up_site = site_index(i, up_j)
-                
-                H += -2*Jx * Pauli(N_total, X=[current_site, up_site])
-                H += -2*Jy * Pauli(N_total, Y=[current_site, up_site])
-                H += -2*Jz * Pauli(N_total, Z=[current_site, up_site])
-            end
-        end
-    end
-    
-    # External magnetic field terms
-    for site in 1:N_total
-        H += x * Pauli(N_total, X=[site])
-        H += y * Pauli(N_total, Y=[site]) 
-        H += z * Pauli(N_total, Z=[site])
-    end
-
-    DBF.coeff_clip!(H)
-    return H
-end
-
 # - - - - - - - - - - - - -
 # Fermionic Hamiltonians
 # - - - - - - - - - - - - -
@@ -375,7 +254,9 @@ function fermi_hubbard_2D_zigzag(Lx::Int, Ly::Int, t::Float64, U::Float64)
     # HOPPING: loop nearest-neighbour pairs once, add c_i^† c_j + c_j^† c_i (both spins)
     for y in 1:Ly, x in 1:Lx
         #println(x, "  ", y)
+        #println(x, "  ", y)
         jsite = linear_index(x, y)
+        #display(jsite)
         #display(jsite)
          # neighbor +x (right in x)
         if x < Lx
@@ -491,78 +372,57 @@ function graph_adjacency(O::PauliSum{N,T}) where {N,T}
     
     return A 
 end 
+
+
+#
+# - - - Fermi-Hubbard from lattice - - -
+#
 """
- - - - Fermi-Hubbard model 2D (snake/zizag ordering) - - -
- The following function constructs the Hamiltonian for the 2D Fermi-Hubbard model
-    using a snake-like (zigzag) ordering of the lattice sites.
-  Constucts the model on a Lx x Ly lattive of physical sites,
-  each site has two spin-orbitals (up, down), so the total number of fermionic modes is 
-  N_total = 2 * Lx * Ly.
-  If 'snake_ordering' is true, the physical sites follow a row-wise "snake/zigzag" pattern.
-  Returns a PauliSum representing the Hamiltonian.
+    fermi_hubbard_from_lattice(lattice, t, U; eps_coeff=1e-12)
+
+Build a 2D Fermi-Hubbard Hamiltonian (PauliSum) from a lattice object.
+
+Arguments
+- `lattice` : an iterable of bond objects (each bond should expose `.s1` and `.s2` site identifiers).
+- `t`       : hopping amplitude (real).
+- `U`       : on-site interaction strength (real).
+
+Keyword
+- `eps_coeff` : threshold for coefficient clipping (default 1e-12).
+
+Returns
+- `H::PauliSum` : the Hamiltonian in PauliSum form using JW mapping.
 """
-function fermi_hubbard_2D_snake(Lx::Int, Ly::Int, t::Float64, U::Float64; snake_ordering::Bool=false)
-    Nsites  = Lx * Ly
-    N_total = 2 * Nsites
-    H = PauliSum(N_total, Float64)
+function fermi_hubbard_from_lattice(Lx, Ly, t, U)
 
-    # Spin-orbital indices for site j (1-based site indexing)
-    up(j) = 2*j - 1
-    dn(j) = 2*j
+    lattice = build_square_lattice(Lx, Ly; layout = :zigzag, order = :row,
+                                   xperiodic = false, yperiodic = false)
+    N = Lx * Ly
+    N_total = 2 * N  # Total number of spin-orbitals
+    H = PauliOperators.PauliSum(N_total, Float64)
 
-    # Map (row x, col y) -> site index j in [1, Nsites]
-    @inline function site_index(x::Int, y::Int)
-        if !snake_ordering
-            # Row-major
-            return (x - 1) * Ly + y
-        else
-            # Snake (zigzag) row-major:
-            # odd rows (x=1,3,...) go left->right
-            # even rows (x=2,4,...) go right->left
-            if isodd(x)
-                return (x - 1) * Ly + y
-            else
-                return x * Ly - (y - 1)
-            end
-        end
+    # Hopping terms
+    for b in lattice
+        s1_up = 2 * (b.s1 - 1) + 1  # Up spin site index
+        s1_dn = 2 * (b.s1 - 1) + 2  # Down spin site index
+        s2_up = 2 * (b.s2 - 1) + 1  # Up spin site index
+        s2_dn = 2 * (b.s2 - 1) + 2  # Down spin site index
+        # Up spin hopping
+        term = DBF.JWmapping(N_total, i=s1_up, j=s2_up) + DBF.JWmapping(N_total, i=s2_up, j=s1_up)
+        H += -t * term
+        # Down spin hopping
+        term = DBF.JWmapping(N_total, i=s1_dn, j=s2_dn) + DBF.JWmapping(N_total, i=s2_dn, j=s1_dn)
+        H += -t * term
     end
-
-    # HOPPING: nearest-neighbor pairs (right and down) — add h.c.; both spins
-    for x in 1:Lx, y in 1:Ly
-        jsite = site_index(x, y)
-
-        # neighbor in +x (next row)
-        if x < Lx
-            isite = site_index(x + 1, y)
-            for spin in (up, dn)
-                m = spin(jsite)
-                n = spin(isite)
-                term = JWmapping(N_total, i=m, j=n) + JWmapping(N_total, i=n, j=m)
-                H += -t * term
-            end
-        end
-
-        # neighbor in +y (next column)
-        if y < Ly
-            isite = site_index(x, y + 1)
-            for spin in (up, dn)
-                m = spin(jsite)
-                n = spin(isite)
-                term = JWmapping(N_total, i=m, j=n) + JWmapping(N_total, i=n, j=m)
-                H += -t * term
-            end
-        end
-    end
-
-    # On-site interaction U * n_up * n_dn
-    for i in 1:Nsites
-        a_up = 2*i - 1
-        a_dn = 2*i
-        interaction_term = U * JWmapping(N_total, i=a_up, j=a_up) *
-                               JWmapping(N_total, i=a_dn, j=a_dn)
-        H += interaction_term
+    # On-site interaction terms
+    for n in 1:N
+        up_index = 2 * (n - 1) + 1
+        dn_index = 2 * (n - 1) + 2
+        term = DBF.JWmapping(N_total, i=up_index, j=up_index) * DBF.JWmapping(N_total, i=dn_index, j=dn_index)
+        H += U * term
     end
 
     DBF.coeff_clip!(H)
     return H
+
 end
