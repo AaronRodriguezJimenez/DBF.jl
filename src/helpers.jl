@@ -110,14 +110,6 @@ function coeff_clip!(ps::KetSum{N}; thresh=1e-16) where {N}
     return filter!(p->abs(p.second) > thresh, ps)
 end
 
-function coeff_clip!(ps::PauliSum{N}; thresh=1e-16) where {N}
-    return filter!(p->abs(p.second) > thresh, ps)
-end
-
-function coeff_clip(ps::PauliSum{N}; thresh=1e-16) where {N}
-    return filter(p->abs(p.second) > thresh, ps)
-end
-
 """
     Clip based on Pauli weight.
     Performs the pruning by removing all terms with weight > max_weight.
@@ -127,20 +119,7 @@ function weight_clip!(ps::PauliSum{N}, max_weight::Int) where {N}
 end
 
 function majorana_weight_clip!(ps::PauliSum{N}, max_weight::Int) where {N}
-    filter!(p->majorana_weight(p.first) <= max_weight, ps)
-end
-
-"""
-    Combined weight and coefficient clipping.
-    w_type = 0 : Pauli weight
-    w_type = 1 : Majorana weight
-"""
-function clip_thresh_weight!(ps::PauliSum{N}; thresh=1e-16, lc = 0, w_type = 0) where {N}
-    if w_type == 0 
-        filter!(p->(weight(p.first) <= lc) && (abs(p.second) > thresh) , ps)
-    else
-        filter!(p->(majorana_weight(p.first) <= lc) && (abs(p.second) > thresh) , ps)
-    end     
+    return filter!(p->majorana_weight(p.first) <= max_weight, ps)
 end
 
 """
