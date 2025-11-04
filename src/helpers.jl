@@ -110,6 +110,10 @@ function coeff_clip!(ps::KetSum{N}; thresh=1e-16) where {N}
     return filter!(p->abs(p.second) > thresh, ps)
 end
 
+function coeff_clip!(ps::PauliSum{N}; thresh=1e-16) where {N}
+    return filter!(p->abs(p.second) > thresh, ps)
+end
+
 """
     Clip based on Pauli weight.
     Performs the pruning by removing all terms with weight > max_weight.

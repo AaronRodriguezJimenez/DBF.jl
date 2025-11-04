@@ -4,6 +4,7 @@ using Printf
 using Random
 using LinearAlgebra
 using JLD2
+using Plots
 
 function get_expectation_value(O, ψ, g, θ, ϵcoeff, ϵweight)
     accum_error = 0.0
@@ -13,7 +14,7 @@ function get_expectation_value(O, ψ, g, θ, ϵcoeff, ϵweight)
     ev2 = 0.0
     for (g,a) in zip(g,θ)
         
-        evolve!(O, g, a)
+        DBF.evolve!(O, g, a)
         
         ev1 = expectation_value(O,ψ)
         
@@ -36,9 +37,9 @@ function get_spin_correlation_function(ψ::Ket{N}, i, j, g, θ, ϵcoeff, ϵweigh
     S += Pauli(N, Y=[i,j])
     S += Pauli(N, Z=[i,j])
     gref,aref = DBF.get_1d_neel_state_sequence(N)
-    gref,aref = DBF.get_rvb_sequence(N)
+   # gref,aref = DBF.get_rvb_sequence(N)
     for (gi, ai) in zip(gref,aref)
-        evolve!(S, gi, ai)
+        DBF.evolve!(S, gi, ai)
     end
     return get_expectation_value(S, ψ, g, θ, ϵcoeff, ϵweight)
 end
@@ -48,15 +49,16 @@ function get_spin_correlation_function(ψ::Ket{N}, i, g, θ, ϵcoeff, ϵweight) 
     S += Pauli(N, Y=[i])
     S += Pauli(N, Z=[i])
     gref,aref = DBF.get_1d_neel_state_sequence(N)
-    gref,aref = DBF.get_rvb_sequence(N)
+  #  gref,aref = DBF.get_rvb_sequence(N)
     for (gi, ai) in zip(gref,aref)
-        evolve!(S, gi, ai)
+        DBF.evolve!(S, gi, ai)
     end
     return get_expectation_value(S, ψ, g, θ, ϵcoeff, ϵweight)
 end
 
 function run()
     @load "t1e-2.jld2"
+    println(out)
    
     g = out["generators"]
     θ = out["angles"]
@@ -77,8 +79,8 @@ function run()
     cs[i] = vs[end] 
     cse[i] = vs[end] - vse[end]
    
-    # sites = [2,3,4,5,10,50]
-    sites = collect(2:N÷2)
+    # sites = [2,3,4,5,10,100]
+    sites = collect(2:N)
     for j in sites 
         vs, vse, S = get_spin_correlation_function(ψ, j, g, θ, thresh, max_weight)
         @printf(" S(%3i) = %12.8f %12.8f len(S) = %12i\n", j, vs[end], vse[end], length(S))
@@ -105,3 +107,27 @@ end
 
 
 css, css_corrected = run()
+
+# Define the distance or site indices
+sites = collect(1:length(css))
+
+# Plot the correlation function
+plot(sites, css,
+    seriestype = :scatter,
+    label = "⟨S(i)S(j)⟩ - ⟨S(i)⟩⟨S(j)⟩",
+    xlabel = "Site j (distance from i)",
+    ylabel = "Correlation",
+    title = "Spin Correlation Function",
+    legend = :topright,
+    markersize = 1,
+    lw = 2,
+)
+
+# (Optional) overlay corrected version
+plot!(sites, css_corrected,
+    seriestype = :line,
+    label = "Corrected",
+    lw=2,
+)
+
+savefig("spin_correlation.png")

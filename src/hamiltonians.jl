@@ -107,7 +107,7 @@ function JWmapping(N; i::Int, j::Int)
     ay = Pauli{N}(1, reinterpret(Int128, umask_le(i)), reinterpret(Int128, ubit(i)))
     by = Pauli{N}(1, reinterpret(Int128, umask_le(j)), reinterpret(Int128, ubit(j)))
 
-    # c†_i = (X_i - Y_i)/2,  c_j = (X_j + Y_j)/2   in your convention
+    # c†_i = (X_i - iY_i)/2,  c_j = (X_j + iY_j)/2
     c_dagg_i = 0.5 * (ax - ay)
     c_j      = 0.5 * (bx + by)
 

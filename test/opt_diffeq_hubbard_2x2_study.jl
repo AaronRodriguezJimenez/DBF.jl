@@ -99,8 +99,9 @@ function run()
     display(H)
 
     
-    Nparticles = 2
+    Nparticles = 4
     ψ, occ = particle_ket(N, Nparticles, mode=:random)
+    #ψ, occ = DBF.particle_ket(N, Nparticles, 0.0; mode=:Neel, flavor=:Aup)
     display(ψ)
     println(" Occupation: ", occ)
 

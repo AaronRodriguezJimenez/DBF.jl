@@ -9,9 +9,9 @@ function run()
     N = 100 
     H = DBF.heisenberg_1D(N, -1, -1, -1)
     DBF.coeff_clip!(H)
-    
+    display(H)
     g,a = DBF.get_1d_neel_state_sequence(N)
-    g,a = DBF.get_rvb_sequence(N)
+    #g,a = DBF.get_rvb_sequence(N)
    
     for (gi, ai) in zip(g,a)
         H = evolve(H, gi, ai)
