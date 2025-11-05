@@ -63,7 +63,7 @@ function run()
                                     grad_coeff_thresh=1e-6,
                                     energy_lowering_thresh=1e-6,
                                     max_rots_per_grad=100, 
-                                    checkfile = "t1e-2_hub2x2")
+                                    checkfile = "t1e-2_hub")
     
     
 end
