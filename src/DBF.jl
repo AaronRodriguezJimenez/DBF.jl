@@ -8,7 +8,6 @@ using OrderedCollections
 # Hmap = FermiCG.LinOpMat{T}(matvec, length(vec), true)
 XZPauliSum{T} = Dict{Int128,Vector{Tuple{Int128,T}}}
 
-
 include("helpers.jl")
 include("hamiltonians.jl")
 include("diagonalization.jl")
@@ -41,13 +40,14 @@ export T_gate
 export adapt_fermion
 export dbf_groundstate_test
 
-# New Modules for lattice handling
 include("lattices/Lattices.jl")  # defines submodule
+# New Modules for lattice handling
 using .Lattices                  # make it accessible inside QuantumChemQC
 using  Graphs
 export Lattices
 export LatticeBond, Lattice
 export lattice2graph, dec2bin, bin2dec, bin2bonds!
 export square_lattice, build_square_lattice
+
 
 end
