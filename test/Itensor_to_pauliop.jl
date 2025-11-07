@@ -272,7 +272,7 @@ function fermi_hubbard_from_lattice(Lx, Ly, t, U)
 
 end
 
-function main(; Nx = 2 , Ny = 2, U = 2.0, t = 1.0,conserve_qns_ = true)
+function main(; Nx = 2 , Ny = 2, U = 2.0, t = 1.0,conserve_qns_ = false)
     N = Nx * Ny
 
     #Create an array of `N` physical site indices of type `electron` with quantum number conservation
@@ -329,10 +329,158 @@ function main(; Nx = 2 , Ny = 2, U = 2.0, t = 1.0,conserve_qns_ = true)
     return H_itensor, psi0,H_pauli
 end
 
-main()
+Htensor, psi0, HPauli = main()
 
-lattice = build_square_lattice(3, 3; layout = :zigzag, order = :col,
-                               xperiodic = false, yperiodic = false)
+println("Hamiltonian in ITensor format:")
+display(Htensor)
 
-println("LATTICE 3x3 zigzag row-major:")
-display(lattice)
+println("Initial state:")
+display(psi0)
+
+println("Hamiltonian in PauliSum format:")
+#display(HPauli)
+
+coeff = []
+pauli_strings = []
+
+for (p,c) in HPauli
+    push!(pauli_strings, string(p))
+    push!(coeff, real(c))
+end
+
+# s = sites[1]
+# for name in ["Cup","Cdagup","Cdn","Cdagdn","Nup","Ndn","Sz","Sx","Zup","Zdn"]
+#     print(name, ": ")
+#     try
+#         println(op(name, s))
+#     catch err
+#         println("NOT AVAILABLE")
+#     end
+# end
+
+function local_pauli_expansion(ch::Char, site::Int, spin::Symbol)
+    # choose correct operator names for this Electron site implementation
+    suffix = spin == :up ? "up" : "dn"   # typical naming in many examples
+    Cname = "C" * suffix        # "Cup" or "Cdn"
+    Cdagname = "Cdag" * suffix  # "Cdagup" or "Cdagdn"
+    Nname = "N" * suffix        # "Nup" or "Ndn"
+
+    if ch == 'I'
+        return [(1.0 + 0im, Vector{Tuple{String,Int}}())]  # empty ops_local means identity
+    elseif ch == 'Z'
+        # Z = I - 2*N 
+        return [(1.0 + 0im, Vector{Tuple{String,Int}}()), (-2.0 + 0im, [(Nname, site)])]
+    elseif ch == 'X'
+        # X = c + c^†
+        return [(1.0 + 0im, [(Cname, site)]), (1.0 + 0im, [(Cdagname, site)])]
+    elseif ch == 'Y'
+        # Y = i (c^† - c)  => i*c^† + (-i)*(-c) => i*(c^†) + (-i)*(c)
+        return [(im, [(Cdagname, site)]), (-im, [(Cname, site)])]
+    else
+        error("Unhandled Pauli character: $ch")
+    end
+end
+
+# Build MPO from Pauli strings of length 2*Nsites with interleaving α,β,α,β...
+function build_mpo_from_paired_paulis_to_electron(pauli_strings, coeff, sites)
+    Nsites = length(sites)
+    os = OpSum()
+
+    for (pstr, c0) in zip(pauli_strings, coeff)
+        @assert length(pstr) == 2Nsites "Pauli string length must be 2*Nsites"
+
+        # Start with one "partial term": (coeff_partial, vector_of_ops)
+        partial_terms = [(c0 + 0im, Vector{Tuple{String,Int}}())]
+
+        for (j, ch) in enumerate(pstr)
+            if ch == 'I'
+                continue
+            end
+            # map interleaved qubit index -> (site, spin)
+            site = (j + 1) ÷ 2
+            spin = (j % 2 == 1) ? :up : :dn
+
+            println("Expanding char ", ch, " at qubit index ", j, " -> site ", site, " spin ", spin)
+
+            local_terms = local_pauli_expansion(ch, site, spin)
+            println("Local terms for char ", ch, " on site ", site, " spin ", spin, ": ")
+
+            # Multiply/expand existing partial_terms by each entry in local_terms
+            new_partials = Vector{Tuple{Complex, Vector{Tuple{String,Int}}}}()
+            for (pc, pops) in partial_terms
+                for (lc, lops) in local_terms
+                    newc = pc * lc
+                    newops = copy(pops)
+                    # append local operator if not identity
+                    for lop in lops
+                        push!(newops, lop)
+                    end
+                    push!(new_partials, (newc, newops))
+                end
+            end
+            partial_terms = new_partials 
+        end
+
+        # Add all expanded product-terms to OpSum
+        for (termc, termops) in partial_terms
+            if isempty(termops)
+                # pure scalar times identity on full chain
+                os += termc  # this adds global identity term
+            else
+                flat = Tuple([x for pair in termops for x in pair])
+                os += termc, flat...
+            end
+        end
+    end
+
+    return MPO(os, sites)
+end
+
+function compare()
+    N = 4
+    sites = siteinds("Electron", N; conserve_qns = false)
+    os = OpSum()
+
+    H_compare_itensor = build_mpo_from_paired_paulis(pauli_strings, coeff, sites)
+ 
+    # for (pstr, c) in zip(pauli_strings, coeff)
+    #     opsites = []
+    #    # println("Processing Pauli string: ", pstr, " with coefficient ", c)
+    #    # display(pstr)
+    #     for (i, p) in enumerate(pstr)
+    #         if p != 'I'
+    #         #    site_index = i
+    #         #    push!(opsites, (string(p), site_index))
+    #              if i%2 == 1
+    #                  # Up spin site index
+    #                  site_index = (i + 1) ÷ 2
+    #              else
+    #                  # Down spin site index
+    #                  site_index = i ÷ 2
+    #              end
+    #             # println("Adding operator ", p, " on site ", site_index)
+    #              push!(opsites, (string(p), site_index))
+    #         end
+    #     end
+
+    #     display(opsites)
+
+    #     if length(opsites) > 0
+    #         # Flatten operator-site pairs and splat the tuple for OpSum
+    #         flat_opsites = Tuple([x for pair in opsites for x in pair])
+    #         println("Adding term: ", c, " * ", opsites)
+    #         os += c, flat_opsites...
+    #     end
+    # end
+    # H_compare_itensor = MPO(os, sites)
+    return H_compare_itensor
+end
+
+H_compare_itensor = compare()
+println("Hamiltonian converted back to ITensor format from PauliSum:")
+display(H_compare_itensor)
+#lattice = build_square_lattice(3, 3; layout = :zigzag, order = :col,
+#                               xperiodic = false, yperiodic = false)
+
+#println("LATTICE 3x3 zigzag row-major:")
+#display(lattice)
