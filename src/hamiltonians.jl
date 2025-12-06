@@ -186,6 +186,7 @@ function heisenberg_2D_zigzag(Nx, Ny, Jx, Jy, Jz; x=0, y=0, z=0, periodic=true)
         H += z * Pauli(N_total, Z=[site])
     end
 
+    coeff_clip!(H)
     return H
 end
 
