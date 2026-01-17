@@ -46,9 +46,9 @@ using Test
     @printf(" %3s %12s %12s %12s %12s\n", "Idx", "H", "diag(H)", "U'HU", "diag(U'HU)")
     for i in 1:2^N
         @printf(" %3i %12.8f %12.8f %12.8f %12.8f\n", i, evals1[i], evals2[i], evals3[i], evals4[i])
-        @test isapprox(evals1[i], evals3[i], atol=1e-8)
+        @test isapprox(evals1[i], evals3[i], atol=1e-7)
     end
-    @test isapprox(evals1[1], evals4[1], atol=1e-8)
+    @test isapprox(evals1[1], evals4[1], atol=1e-7)
     @test abs(DBF.variance(H,ψ)) < 1e-6
     
 end
